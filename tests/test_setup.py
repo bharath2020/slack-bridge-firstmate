@@ -21,6 +21,8 @@ BOT = "xoxb-111-222-abcDEF"
 APP = "xapp-1-A111-333-def456"
 ONE = "myteam\nTeam ID: T0123\nUser ID: U0CAPTAIN\nLast Updated: today"
 TWO = ONE + "\n\nother (Team ID: T0999)\nUser ID: U0OTHER\nLast Updated: today"
+ORG = ("example-org (Team ID: E0000000A)\nUser ID: W0000000B\n"
+       "Last Updated: 2026-10-26 14:06:32 -07:00\nAuthorization Level: Organization")
 
 
 class SetupTest(unittest.TestCase):
@@ -144,6 +146,79 @@ class SetupTest(unittest.TestCase):
         self.assertIn("Keeping the app as it is", self.out)
         self.assertEqual(self.log("install.log"), ["--deps-only", "--skip-doctor"])
         self.assert_no_secrets()
+
+    def test_organization_login_end_to_end(self):
+        proc = self.run_setup("~/fm\nT0000000C\n\n", FAKE_SLACK_LOGIN_AS=ORG)
+        self.assertEqual(proc.returncode, 0, self.out)
+        self.assertIn("deploy --team E0000000A --org-workspace-grant T0000000C", self.slack_calls())
+        self.assertEqual(self.store()["captain/slack-bridge.captain-user-id"], "W0000000B")
+        self.assertIn("--skip-doctor", self.log("install.log"))
+        self.assertTrue(self.log("bridge.log")[1].startswith("say "))
+        self.assert_no_secrets()
+
+    def test_organization_rerun_reuses_workspace_and_app_token(self):
+        self.assertEqual(self.run_setup("~/fm\nT0000000C\n\n", FAKE_SLACK_LOGIN_AS=ORG).returncode, 0, self.out)
+        self.assertEqual(self.run_setup("\n\n\n\n\n", FAKE_SLACK_APP=None).returncode, 0, self.out)
+        self.assertNotIn("Paste the xapp- token", self.out)
+        self.assertIn("Workspace ID inside this organization (starts with T) [T0000000C]", self.out)
+        support = self.home / "Library/Application Support/slack-bridge"
+        self.assertEqual((support / "workspace").read_text().strip(), "E0000000A")
+        self.assertEqual(Config(state_dir=support).slack_team_id, "T0000000C")
+        self.assert_no_secrets()
+
+    def test_organization_workspace_switch_stops_before_changing_credentials(self):
+        self.assertEqual(self.run_setup("~/fm\nT0000000C\n\n", FAKE_SLACK_LOGIN_AS=ORG).returncode, 0, self.out)
+        original = self.store()
+        proc = self.run_setup("\n\nT0000000D\n")
+        self.assertEqual(proc.returncode, 1, self.out)
+        self.assertIn("already bound to another workspace in this organization", self.out)
+        self.assertEqual(self.store(), original)
+
+    def test_organization_admin_approval_stops_before_service_install(self):
+        proc = self.run_setup("~/fm\nT0000000C\n", FAKE_SLACK_LOGIN_AS=ORG,
+                              FAKE_SLACK_DEPLOY_RC="0")
+        self.assertEqual(proc.returncode, 1, self.out)
+        self.assertIn("org-admin approval", self.out)
+        self.assertIn("wait for Slackbot", self.out)
+        self.assertNotIn("--skip-doctor", self.log("install.log"))
+        self.assertNotIn("All set", self.out)
+
+    def test_organization_requires_workspace_not_organization_id_for_grant(self):
+        proc = self.run_setup("~/fm\nE0000000A\ninvalid\n\n", FAKE_SLACK_LOGIN_AS=ORG)
+        self.assertEqual(proc.returncode, 1, self.out)
+        self.assertIn("No workspace ID was selected", self.out)
+        self.assertEqual(self.store(), {})
+        self.assertFalse([c for c in self.slack_calls() if c.startswith("deploy")])
+
+    def test_workspace_heading_output_regression(self):
+        auth = ("example-workspace (Team ID: T0000000A)\nUser ID: U0000000B\n"
+                "Last Updated: today\nAuthorization Level: Workspace")
+        proc = self.run_setup("~/fm\n\n", FAKE_SLACK_LOGIN_AS=auth)
+        self.assertEqual(proc.returncode, 0, self.out)
+        self.assertIn("deploy --team T0000000A", self.slack_calls())
+        self.assertEqual(self.store()["captain/slack-bridge.captain-user-id"], "U0000000B")
+        self.assert_no_secrets()
+
+    def test_unrecognized_account_reports_safe_details_without_repeating_login(self):
+        (self.dir / "auth").write_text(ORG.replace("W0000000B", "X0000000B") + f"\nToken: {BOT}")
+        proc = self.run_setup("~/fm\n")
+        self.assertEqual(proc.returncode, 1, self.out)
+        self.assertIn("No usable account could be read", self.out)
+        self.assertIn("example-org (Team ID: E0000000A)", self.out)
+        self.assertIn("User ID: X0000000B", self.out)
+        self.assertIn("Authorization Level: Organization", self.out)
+        self.assertIn("https://github.com/bharath2020/slack-bridge/issues", self.out)
+        self.assertNotIn("login", self.slack_calls())
+        self.assertEqual(self.store(), {})
+        self.assert_no_secrets()
+
+    def test_pending_approval_does_not_reuse_stale_tokens_or_start_service(self):
+        self.installed()
+        proc = self.run_setup("\n\n\n", FAKE_SLACK_DEPLOY_RC="0")
+        self.assertEqual(proc.returncode, 1, self.out)
+        self.assertIn("exit code of 0 can mean admin approval is pending", self.out)
+        self.assertNotIn("--skip-doctor", self.log("install.log"))
+        self.assertNotIn("All set", self.out)
 
     def test_rerun_updates_the_existing_app(self):
         self.installed()
@@ -332,7 +407,7 @@ class SetupTest(unittest.TestCase):
     def test_failed_deploy_stops_with_next_step(self):
         proc = self.run_setup("~/fm\n\n", FAKE_SLACK_DEPLOY_RC="1")
         self.assertEqual(proc.returncode, 1)
-        self.assertIn("slack deploy stopped before the app was installed (exit 1)", self.out)
+        self.assertIn("slack deploy did not confirm installation through the bridge hook (exit 1)", self.out)
         self.assertIn("run scripts/setup.sh again", self.out)
         self.assertEqual(self.log("install.log"), ["--deps-only"])
 
@@ -340,7 +415,7 @@ class SetupTest(unittest.TestCase):
         proc = self.run_setup("~/fm\n\n\n\n", FAKE_DOCTOR_RC="1",
                               FAKE_DOCTOR="FAIL no Firstmate pane found in Herdr session 'default'")
         self.assertEqual(proc.returncode, 0, self.out)
-        self.assertIn("Firstmate is not running in Herdr right now", self.out)
+        self.assertIn("The bridge doctor returned exit 1", self.out)
         self.assertIn("--skip-doctor", self.log("install.log"))
 
     def test_doctor_keychain_failure_stops(self):
@@ -383,6 +458,16 @@ class SetupTest(unittest.TestCase):
 
 
 class FmHomeConfigTest(unittest.TestCase):
+    def test_org_workspace_binding_requires_a_workspace_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Config(state_dir=Path(tmp))
+            self.assertIsNone(cfg.slack_team_id)
+            (Path(tmp) / "org-workspace").write_text("T0000000C\n")
+            self.assertEqual(cfg.slack_team_id, "T0000000C")
+            (Path(tmp) / "org-workspace").write_text("E0000000A\n")
+            with self.assertRaisesRegex(RuntimeError, "invalid org-workspace binding"):
+                _ = cfg.slack_team_id
+
     def test_saved_fm_home_and_env_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "fm-home").write_text("/somewhere/firstmate\n")
@@ -424,6 +509,40 @@ class FmHomeConfigTest(unittest.TestCase):
             (Path(dev) / "fm-home").write_text("/dev/firstmate\n")
             self.assertEqual(Config.from_env({"SLACK_BRIDGE_STATE_DIR": dev}).fm_home,
                              "/dev/firstmate")
+
+
+class StoredWorkspaceTest(unittest.TestCase):
+    def test_auth_test_accepts_workspace_and_organization_credentials(self):
+        # Execute the actual shell function and its inline Python, with both
+        # Keychain reads and urlopen replaced before the inline code imports them.
+        with tempfile.TemporaryDirectory() as tmp:
+            wrapper = Path(tmp) / "python"
+            wrapper.write_text(f"#!{sys.executable}\n" +
+                               "import io, os, sys\nfrom unittest import mock\n" +
+                               f"sys.path.insert(0, {str(REPO)!r})\n" +
+                               "with mock.patch('slack_bridge.config.keychain_read', return_value='xoxb-fake'), " +
+                               "mock.patch('urllib.request.urlopen', return_value=io.BytesIO(os.environ['AUTH_TEST'].encode())):\n" +
+                               "    exec(sys.stdin.read())\n")
+            wrapper.chmod(0o755)
+            for body, expected in (
+                ({"ok": True, "team_id": "T0000000A"}, "T0000000A"),
+                ({"ok": True, "team_id": "E0000000A"}, "E0000000A"),
+                ({"ok": True, "team_id": None, "enterprise_id": "E0000000A"}, "E0000000A"),
+                ({"ok": True, "team_id": "X0000000A"}, None),
+                ({"ok": False, "team_id": "E0000000A"}, None),
+            ):
+                with self.subTest(body=body):
+                    env = {"PATH": os.environ["PATH"], "HOME": tmp, "PYTHON": str(wrapper),
+                           "AUTH_TEST": json.dumps(body)}
+                    proc = subprocess.run(["bash", "-c", 'source "$1"; stored_workspace',
+                                           "test", str(REPO / "scripts/setup.sh")],
+                                          env=env, capture_output=True, text=True, check=False)
+                    if expected:
+                        self.assertEqual(proc.returncode, 0, proc.stderr)
+                        self.assertEqual(proc.stdout.strip(), expected)
+                    else:
+                        self.assertNotEqual(proc.returncode, 0)
+                        self.assertIn("Could not verify", proc.stderr)
 
 
 if __name__ == "__main__":

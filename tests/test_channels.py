@@ -264,6 +264,13 @@ class WebSlackChannelTest(TempCase):
         self.assertEqual(err.exception.code, "name_taken")
         self.assertNotIn("payload", str(err.exception))
 
+    def test_org_token_scopes_channel_creation_and_every_list_page(self):
+        web = WebSlack("unused", client=self.client, team_id="T0000000C")
+        self.assertEqual(web.create_private_channel(NAME), "C9")
+        self.assertEqual(web.find_private_channel(NAME), "C2")
+        for _, kwargs in self.client.calls:
+            self.assertEqual(kwargs["team_id"], "T0000000C")
+
     def test_invite_tolerates_a_member_only(self):
         self.client.errors["invite"] = "already_in_channel"
         self.web.invite("C9", CAPTAIN)

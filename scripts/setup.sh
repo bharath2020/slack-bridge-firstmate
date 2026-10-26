@@ -21,6 +21,7 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 support="$HOME/Library/Application Support/slack-bridge"
 fm_home_file="$support/fm-home"
 workspace_file="$support/workspace"
+org_workspace_file="$support/org-workspace"
 app_file="$support/app-id"
 marker="$support/last-deploy"
 logs="$HOME/Library/Logs/slack-bridge"
@@ -36,6 +37,7 @@ slack_cli=
 fm_home=
 captain=
 team=
+org_workspace=
 bound=0
 total=7
 
@@ -205,16 +207,40 @@ choose_fm_home() {
 # account's fields, and the team id ("-" if unknown) is in it or its own field.
 auth_accounts() {
   "$slack_cli" auth list --no-color --skip-update 2>/dev/null | awk '
-    function team_id(s) { if (match(s, /Team ID:[ \t]*[A-Z0-9]+/)) { s = substr(s, RSTART, RLENGTH); sub(/Team ID:[ \t]*/, "", s); return s } return "" }
+    function team_id(s) { if (match(s, /Team ID:[ \t]*[TE][A-Z0-9]+/)) { s = substr(s, RSTART, RLENGTH); sub(/Team ID:[ \t]*/, "", s); return s } return "" }
     { sub(/\r$/, "") }
     /User ID:/ {
       id = $0; sub(/.*User ID:[ \t]*/, "", id); sub(/[^A-Z0-9].*/, "", id)
-      if (id ~ /^U/) print id "\t" (tid == "" ? "-" : tid) "\t" (team == "" ? "your workspace" : team)
+      if (id ~ /^[UW][A-Z0-9]+$/) print id "\t" (tid == "" ? "-" : tid) "\t" (team == "" ? "your workspace" : team)
       next
     }
     /^[ \t]*Team ID[ \t]*:/ { tid = team_id($0); next }
     /^[ \t]*$/ || /^[ \t]*(Last Updated|Authorization Level|Enterprise ID|Team Domain)[ \t]*:/ { next }
     { team = $0; gsub(/^[ \t]+|[ \t]+$/, "", team); tid = team_id(team) }' || true
+}
+
+# Only recognized fields are shown, never arbitrary CLI output or credentials.
+auth_diagnostic() {
+  "$slack_cli" auth list --no-color --skip-update 2>/dev/null | "$python" -c '
+import re, sys
+text = sys.stdin.read()
+def clean(value):
+    return re.sub(r"(?:xox[a-z]-|xapp-)[A-Za-z0-9-]+", "<redacted>", value)[:160]
+for line in text.splitlines():
+    if "(Team ID:" in line:
+        print("    Account: " + clean(line.strip()))
+    elif re.match(r"\s*(Team ID|User ID|Authorization Level)\s*:", line):
+        print("    " + clean(line.strip()))
+' || true
+}
+
+require_accounts() {
+  [ -z "$accounts" ] || return 0
+  auth_diagnostic
+  fail "No usable account could be read from slack auth list." \
+       "If account details appear above, login exists but its format was not recognized." \
+       "Update with: slack upgrade; then rerun setup. If no account is listed, run: slack login" \
+       "If it persists, report the safe account details at https://github.com/bharath2020/slack-bridge/issues."
 }
 
 slack_login() {
@@ -241,8 +267,8 @@ try:
                                  headers={"Authorization": f"Bearer {token}"}, method="POST")
     with urllib.request.urlopen(req, timeout=20) as response:
         body = json.load(response)
-    team = body.get("team_id", "")
-    if not body.get("ok") or not re.fullmatch(r"T[A-Z0-9]+", team):
+    team = body.get("team_id") or body.get("enterprise_id") or ""
+    if not body.get("ok") or not re.fullmatch(r"[TE][A-Z0-9]+", team):
         raise ValueError("unverified workspace")
 except Exception:
     sys.exit("Could not verify the workspace of existing Keychain credentials.")
@@ -251,7 +277,7 @@ EOF
 }
 
 pick_account() {
-  local accounts n choice line stored=
+  local accounts n choice line listing stored=
   accounts=$(auth_accounts)
   if [ -n "$accounts" ]; then
     n=$(printf '%s\n' "$accounts" | wc -l | tr -d ' ')
@@ -260,11 +286,14 @@ pick_account() {
       confirm "Set the bridge up for this workspace?" y || { slack_login; accounts=$(auth_accounts); }
     fi
   else
+    # An unrecognized record is different from an absent login. Do not ask
+    # someone who is already logged in to repeat the login challenge.
+    listing=$("$slack_cli" auth list --no-color --skip-update 2>/dev/null || true)
+    case "$listing" in *'User ID:'*) require_accounts ;; esac
     slack_login
     accounts=$(auth_accounts)
   fi
-  [ -n "$accounts" ] ||
-    fail "The Slack CLI shows no logged-in account." "Run: slack login   and check it with: slack auth list"
+  require_accounts
   n=$(printf '%s\n' "$accounts" | wc -l | tr -d ' ')
   choice=1
   if [ "$n" != 1 ]; then
@@ -281,7 +310,9 @@ pick_account() {
   team=$(printf '%s' "$line" | cut -f 2)
   [ "$team" != - ] || team=
   [ -n "$team" ] ||
-    fail "Could not identify the selected workspace." "Update the Slack CLI and check: slack auth list"
+    { auth_diagnostic; fail "Could not identify the selected workspace." \
+      "The selected account has no supported T workspace or E organization ID." \
+      "Update the Slack CLI and check: slack auth list"; }
   if [ -s "$workspace_file" ]; then
     stored=$(cat "$workspace_file")
   elif keychain_has slack-bridge.bot-token; then
@@ -296,6 +327,24 @@ pick_account() {
          "To replace the old bridge, follow the workspace-switch steps in SETUP.md first."
   fi
   [ -z "$stored" ] || bound=1
+  if [[ "$team" = E* ]]; then
+    say "This login covers an Enterprise Grid organization, not a single workspace."
+    say "Choose one workspace in that organization for this bridge."
+    say "In Slack's browser URL app.slack.com/client/T.../..., copy the T... workspace ID."
+    local saved_workspace='' tries=0
+    [ ! -s "$org_workspace_file" ] || saved_workspace=$(cat "$org_workspace_file")
+    while :; do
+      ask org_workspace "Workspace ID inside this organization (starts with T)" "$saved_workspace"
+      [[ "$org_workspace" =~ ^T[A-Z0-9]+$ ]] && break
+      tries=$((tries + 1))
+      [ "$tries" -lt 3 ] || fail "No workspace ID was selected." "Use the T... ID from your intended workspace's Slack browser URL."
+      warn "That is not a workspace ID; use T followed by uppercase letters and digits."
+    done
+    if [ -n "$saved_workspace" ] && [ "$org_workspace" != "$saved_workspace" ]; then
+      fail "This bridge is already bound to another workspace in this organization." \
+           "Follow the workspace-switch steps in SETUP.md before replacing it."
+    fi
+  fi
   # Pass the selected member explicitly; auth list may contain several accounts.
   keychain_store slack-bridge.captain-user-id "$captain" >/dev/null ||
     fail "Could not save your member id in the Keychain." "Unlock your login keychain (Keychain Access) and try again."
@@ -353,11 +402,19 @@ deploy_app() {
   local rc=0 outcome keep=0 app
   local -a args=()
   [ -z "$team" ] || args=(--team "$team")
+  if [ -n "$org_workspace" ]; then
+    args+=(--org-workspace-grant "$org_workspace")
+    say "Slack will grant the app access to workspace $org_workspace in organization $team."
+    say "If Slack asks for a workspace, choose that workspace, not all workspaces."
+    say "If org-admin approval is required, request it in the CLI and wait for Slackbot's approval message."
+    say "Then rerun setup and choose the existing app to finish installation."
+  fi
   # .slack/apps.json is the Slack CLI's record of the app this clone made.
   if [ -s "$repo/.slack/apps.json" ]; then
     app=$(app_id)
     if [ "$bound" = 1 ] && [ -n "$app" ] && [ "$(cat "$app_file" 2>/dev/null)" = "$app" ]; then keep=1; fi
-    if [ -s "$workspace_file" ] && keychain_has slack-bridge.bot-token && keychain_has slack-bridge.app-token; then
+    if [ -s "$workspace_file" ] &&
+       keychain_has slack-bridge.bot-token && keychain_has slack-bridge.app-token; then
       say "This clone already has its Slack app, and its tokens are in the Keychain."
       if ! confirm "Update the app now (applies manifest.json changes, refreshes its tokens)?" y; then
         ok "Keeping the app as it is"
@@ -382,14 +439,14 @@ deploy_app() {
       ;;
     no-app-token) app_token_fallback ;;
     *)
-      if [ "$rc" -ne 0 ] || ! keychain_has slack-bridge.bot-token || ! keychain_has slack-bridge.app-token; then
-        fail "slack deploy stopped before the app was installed (exit $rc)." \
-             "Scroll up for Slack's message. If it asked you to log in, rerun setup and log in again;" \
-             "if you are not allowed to install apps in this workspace, ask a workspace admin to approve it."
-      fi
+      fail "slack deploy did not confirm installation through the bridge hook (exit $rc)." \
+           "Scroll up for Slack's actual result; an exit code of 0 can mean admin approval is pending." \
+           "If approval was requested, wait for Slackbot's approval message, then rerun setup and choose the existing app." \
+           "If Slack reported an error or cancelled installation, resolve that message before rerunning setup."
       ;;
   esac
   printf '%s\n' "$team" >"$workspace_file"
+  if [ -n "$org_workspace" ]; then printf '%s\n' "$org_workspace" >"$org_workspace_file"; fi
   app=$(app_id)
   if [ -n "$app" ]; then printf '%s\n' "$app" >"$app_file"; else rm -f "$app_file"; fi
   ok "Firstmate app installed; its tokens are in the Keychain"
@@ -409,10 +466,10 @@ install_agent() {
       fail "The setup check found a problem (the FAIL lines above)." \
            "Keychain: rerun setup and update the app. fm-inbox.sh: check the Firstmate folder." \
            "slack_bolt: rerun setup to reinstall the packages."
-    warn "Firstmate is not running in Herdr right now (or herdr is missing)."
+    warn "The bridge doctor returned exit $rc; review its report above before continuing."
     say "The bridge still takes your Slack messages and hands them to Firstmate's inbox."
     confirm "Install the background service anyway?" y ||
-      fail "Stopped before installing the background service." "Start Firstmate in Herdr first."
+      fail "Stopped before installing the background service." "Resolve the doctor's reported problem first."
   fi
   "$installer" --skip-doctor >/dev/null ||
     fail "Could not install the background service." "See the launchctl message above."

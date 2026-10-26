@@ -66,6 +66,17 @@ class DeployHookTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(self.store(), {})
 
+    def test_organization_member_is_saved_and_accepted_at_runtime(self):
+        auth = ("example-org (Team ID: E0000000A)\nUser ID: W0000000B\n"
+                "Last Updated: today\nAuthorization Level: Organization")
+        proc = self.run_hook(SLACK_BOT_TOKEN=BOT, SLACK_APP_TOKEN=APP, FAKE_SLACK_AUTH_LIST=auth)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(self.store()["captain/slack-bridge.captain-user-id"], "W0000000B")
+        secrets = load_secrets(env={"SLACK_BRIDGE_CAPTAIN_ID": "W0000000B",
+                                   "SLACK_BRIDGE_TOKENS_FROM_ENV": "1",
+                                   "SLACK_BOT_TOKEN": BOT, "SLACK_APP_TOKEN": APP})
+        self.assertEqual(secrets.captain_id, "W0000000B")
+
     def test_missing_app_token_explains_manual_step(self):
         proc = self.run_hook(SLACK_BOT_TOKEN=BOT)
         self.assertEqual(proc.returncode, 1)

@@ -14,7 +14,12 @@ case "$1 ${2:-}" in
   "login "*) printf '%s\n' "${FAKE_SLACK_LOGIN_AS:-}" >"$d/auth" ;;
   "deploy "*)
     [ -z "${FAKE_SLACK_DEPLOY_RC:-}" ] || exit "$FAKE_SLACK_DEPLOY_RC"
-    echo "{\"apps\": {\"T0123\": {\"app_id\": \"${FAKE_SLACK_APP_ID:-A0FAKE}\"}}}" >.slack/apps.json
+    team=T0123
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --team ]; then team=$2; shift; fi
+      shift
+    done
+    echo "{\"apps\": {\"$team\": {\"app_id\": \"${FAKE_SLACK_APP_ID:-A0FAKE}\"}}}" >.slack/apps.json
     SLACK_BOT_TOKEN=${FAKE_SLACK_BOT:-} SLACK_APP_TOKEN=${FAKE_SLACK_APP:-} \
       exec ./scripts/slack-deploy-hook.sh ;;
   "app settings"|"upgrade "*) ;;

@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 KEYCHAIN_BOT_TOKEN = "slack-bridge.bot-token"  # xoxb-...
 KEYCHAIN_APP_TOKEN = "slack-bridge.app-token"  # xapp-...
-KEYCHAIN_CAPTAIN_ID = "slack-bridge.captain-user-id"  # U0123ABC
+KEYCHAIN_CAPTAIN_ID = "slack-bridge.captain-user-id"  # U... or Enterprise Grid W...
 
 DEFAULT_FM_HOME = str(Path.home() / "Documents" / "firstmate")
 # scripts/setup.sh saves the Firstmate home it found or was told, one path on
@@ -106,6 +107,17 @@ class Config:
     @property
     def fm_inbox(self) -> str:
         return os.path.join(self.fm_home, "bin", "fm-inbox.sh")
+
+    @property
+    def slack_team_id(self) -> str | None:
+        """Workspace grant selected by setup for an organization bot token."""
+        try:
+            team = (self.state_dir / "org-workspace").read_text().strip()
+        except FileNotFoundError:
+            return None
+        if not re.fullmatch(r"T[A-Z0-9]+", team):
+            raise ConfigError("invalid org-workspace binding; rerun scripts/setup.sh")
+        return team
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":

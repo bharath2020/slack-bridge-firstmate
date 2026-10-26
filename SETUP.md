@@ -2,6 +2,8 @@
 
 The bridge connects one Slack workspace to one Firstmate home on your Mac. You do the Slack approvals yourself; the wizard explains each prompt. Allow about ten minutes, longer if a workspace administrator must approve the app.
 
+Enterprise Grid organization logins are supported, including E-prefixed organization IDs and W-prefixed member IDs. For an organization login, setup asks for the T-prefixed ID of **one workspace inside the organization**. In Slack's browser URL `https://app.slack.com/client/T.../...`, copy the `T...` portion. Setup saves that choice and grants the app access to that workspace; it does not request access to all workspaces. Your member must belong to that workspace.
+
 ## Before you start
 
 - macOS, a logged-in desktop session, and an unlocked login Keychain. No sudo is needed.
@@ -47,10 +49,14 @@ Enter accepts the default in brackets. Tokens are never echoed or put in command
 3. **Firstmate folder.** Looks for a previous choice or common home locations, then asks you to confirm or enter the full path. `~` is accepted. The folder must contain executable `bin/fm-inbox.sh`. The selection is saved under `~/Library/Application Support/slack-bridge/fm-home`. You can use any home path; `~/Documents/firstmate` is only a fallback.
 4. **Slack workspace and member.** Runs `slack login` when needed: paste the `/slackauthticket …` command into Slack, approve it, and enter Slack's challenge code in Terminal. Select the intended workspace if several are logged in. The selected member ID is stored in the Keychain; the bridge accepts commands only from that member. A saved workspace binding prevents accidental workspace switches. For older installs without that binding, setup verifies the bot token's workspace with Slack before changing credentials.
 5. **Create or update the app.** Runs `slack deploy` with the selected workspace and [`manifest.json`](manifest.json). On a fresh install choose **Create a new app**; on reruns choose the existing **Firstmate** app. The CLI retains its app binding in ignored `.slack/apps.json`. Approve Slack's listed permissions. Bot and app-level tokens go into the login Keychain. If Slack supplies no app-level token, setup opens the app settings if you agree and says exactly what to do: **Basic Information → App-Level Tokens → Generate Token and Scopes**, add **connections:write**, generate, copy, then **paste the xapp- token** into the hidden terminal prompt. When Slack supplies none while updating this clone's existing app, setup keeps the stored app-level token if the saved workspace matches and the token was recorded for this same app. It asks for a new one when none is stored, the workspace cannot be confirmed, the token belongs to another app or was never recorded, or this clone creates a new app.
-6. **Background service.** Runs `bin/slack-bridge doctor`. Missing Keychain items, packages, or the inbox helper stop setup. If the Firstmate pane is unavailable, setup asks before continuing. It writes `~/Library/LaunchAgents/com.firstmate.slack-bridge.plist` and reloads only that bridge service. It runs at login and restarts after failure.
+6. **Background service.** Runs `bin/slack-bridge doctor`. Missing Keychain items, packages, or the inbox helper stop setup. Any other doctor problem, such as an unavailable Firstmate pane, is shown and setup asks before continuing. It writes `~/Library/LaunchAgents/com.firstmate.slack-bridge.plist` and reloads only that bridge service. It runs at login and restarts after failure.
 7. **Live check.** Checks that the service runs, verifies the app-level token against Slack, sends a test DM to your selected account, and checks that the service remains running. A rate limit produces a warning instead of claiming inbound delivery was verified. Confirm that the DM arrived in **Apps → Firstmate** in the intended workspace.
 
 Slack's [CLI hooks](https://docs.slack.dev/tools/slack-cli/reference/hooks/) perform manifest deployment and pass tokens to the hook. Slack's [Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/) explains the separate app-level token. The wizard cannot approve workspace policies, login challenges, or token creation for you.
+
+For Enterprise Grid, the CLI's `--team E...` selects the organization and `--org-workspace-grant T...` selects the workspace. If Slack asks you to select a workspace, choose the same workspace you entered in setup. The manifest enables organization deployment. Organization tokens use the saved workspace ID for private-channel creation and lookup; token storage, launchd installation, and the test DM use the same steps as a standalone workspace. The binding is saved in `~/Library/Application Support/slack-bridge/workspace` (the organization ID) and `org-workspace` (the granted workspace ID).
+
+If Slack requires org-admin approval, request it through the CLI. Wait for Slackbot to confirm approval, then **rerun setup and choose the existing app** to finish installing it. A successful CLI exit can mean only that the approval request was submitted; setup stops until the deploy hook confirms installation. See Slack's [Enterprise Grid CLI guide](https://docs.slack.dev/tools/slack-cli/guides/using-slack-cli-on-an-enterprise-grid-organization/) for approval and workspace grants.
 
 ## Verify the round trip
 
@@ -73,6 +79,10 @@ For a manually cloned checkout, run `git pull --ff-only`, then `./scripts/instal
 
 | Setup says | Next step |
 | --- | --- |
+| No usable account could be read / account format not recognized | Setup shows safe account fields when available. If `slack auth list` shows an account, login worked; update with `slack upgrade` and rerun setup. If no account is listed, run `slack login`. If it persists, report the safe workspace/organization name, ID kind and authorization level at https://github.com/bharath2020/slack-bridge-firstmate/issues; never include tokens or debug logs |
+| Enterprise Grid workspace ID requested | Use the T-prefixed ID from the intended workspace's Slack browser URL, not the E-prefixed organization ID. Select that same workspace if Slack prompts; ask an org admin to grant the app access if it is unavailable |
+| Deploy did not confirm installation / admin approval pending | Read Slack's result above the error. Request org-admin approval if prompted, wait for Slackbot's approval notice, then rerun setup and select the existing app. Setup does not start or reload the service while installation is unconfirmed |
+| Already bound to another workspace in this organization | Follow the replacement procedure below; reruns cannot silently change the saved workspace grant |
 | macOS only / interactive terminal required | Run from Terminal in a macOS login session, not a noninteractive job |
 | Python missing / too old | Install Python 3.9+ (`brew install python`), or set `PYTHON` to its executable |
 | Git or Herdr missing | Install the prerequisite and open a new terminal so PATH updates |
@@ -81,11 +91,12 @@ For a manually cloned checkout, run `git pull --ff-only`, then `./scripts/instal
 | Slack CLI too old | Run `slack upgrade`, then rerun |
 | Python packages failed | Read pip's error, check internet access and Python's venv support, then rerun |
 | No Firstmate folder found | Enter the folder containing executable `bin/fm-inbox.sh`; setup retries three times |
-| Slack login failed / no account / workspace unidentified | Run `slack login` and `slack auth list`; use a current CLI, paste the auth ticket promptly, and complete the Slack approval |
+| Slack login did not finish | Read Slack's error; if the ticket expired, rerun setup, paste the ticket promptly, and complete the Slack approval. Check the result with `slack auth list` |
+| Selected workspace unidentified | Read the safe account details above the error. Setup needs a T workspace or E organization ID; update the CLI and check `slack auth list` rather than repeating a successful login |
 | Cannot verify existing credentials | Check network access and the old app; for revoked credentials, follow the replacement procedure below |
 | Already bound to another workspace | Use another Mac/account, or follow the replacement procedure below |
 | Could not save member ID / no app-level token saved | Unlock the login Keychain in Keychain Access; paste an app-level `xapp-` token, not a bot/user token; setup retries three times |
-| Deploy stopped / failed after storing tokens | Read Slack's error; complete login or ask your workspace admin to approve the app, then rerun |
+| Deploy failed after storing tokens | Tokens were stored, but the CLI exited unsuccessfully. Read Slack's actual error above, resolve it, then rerun setup |
 | Doctor FAIL for Keychain / fm-inbox / slack_bolt | Rerun and update the app / correct the home path / reinstall packages, respectively |
 | Firstmate pane unavailable | Start the expected Firstmate pane in Herdr, or explicitly continue with inbox routing; see README configuration for session and pane selection |
 | Could not install service / bootstrap failed | Read launchctl's error; check the login session and generated plist, then rerun |

@@ -45,13 +45,14 @@ def _upload_bytes(url: str, data: bytes) -> int:
 
 
 class WebSlack:
-    def __init__(self, bot_token: str, client=None, upload_bytes=_upload_bytes):
+    def __init__(self, bot_token: str, client=None, upload_bytes=_upload_bytes, *, team_id=None):
         if client is None:
             from slack_sdk import WebClient
 
             client = WebClient(token=bot_token)
         self.client = client
         self.upload_bytes = upload_bytes
+        self.team_id = team_id
 
     def post(self, channel: str, text: str, thread_ts: str | None = None) -> str | None:
         kwargs = {"channel": channel, "text": text, "mrkdwn": True,
@@ -102,8 +103,10 @@ class WebSlack:
 
     def create_private_channel(self, name: str) -> str:
         """Create a private channel the bot is a member of; returns its id."""
-        resp = _call("conversations.create", self.client.conversations_create,
-                     name=name, is_private=True)
+        kwargs = {"name": name, "is_private": True}
+        if self.team_id:
+            kwargs["team_id"] = self.team_id
+        resp = _call("conversations.create", self.client.conversations_create, **kwargs)
         return resp["channel"]["id"]
 
     def invite(self, channel: str, user: str) -> None:
@@ -120,6 +123,8 @@ class WebSlack:
         cursor = None
         while True:
             kwargs = {"types": "private_channel", "exclude_archived": True, "limit": 200}
+            if self.team_id:
+                kwargs["team_id"] = self.team_id
             if cursor:
                 kwargs["cursor"] = cursor
             resp = _call("conversations.list", self.client.conversations_list, **kwargs)

@@ -164,7 +164,7 @@ def cmd_say(cfg: C.Config, args) -> int:
         return 2
     secrets = C.load_secrets(need_app_token=False)
     state = State(cfg.state_dir)
-    slack = WebSlack(secrets.bot_token)
+    slack = WebSlack(secrets.bot_token, team_id=cfg.slack_team_id)
     n, where = say(slack, state, lambda: slack.dm_channel(secrets.captain_id, state), body,
                    thread=args.thread, topic=args.topic, project=args.project,
                    images=attached)
@@ -202,7 +202,7 @@ def cmd_channel(cfg: C.Config, args) -> int:
     from .slack_api import WebSlack
 
     secrets = C.load_secrets(need_app_token=False)
-    channel, msg = projects.create(WebSlack(secrets.bot_token), state, secrets.captain_id,
+    channel, msg = projects.create(WebSlack(secrets.bot_token, team_id=cfg.slack_team_id), state, secrets.captain_id,
                                    args.key, args.name)
     log.info("channel create: project=%s channel=%s", args.key, channel)
     print(f"{channel}\t{msg}")

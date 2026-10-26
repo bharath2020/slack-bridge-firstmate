@@ -50,7 +50,7 @@ def _loop(name: str, interval: float, fn, stop: threading.Event,
 
 def build(cfg: Config, secrets: Secrets):
     state = State(cfg.state_dir)
-    slack = WebSlack(secrets.bot_token)
+    slack = WebSlack(secrets.bot_token, team_id=cfg.slack_team_id)
     inbox = FmInbox(cfg.fm_inbox, cfg.fm_home, timeout=cfg.handoff_timeout_seconds)
 
     def notify(text: str, channel: str | None = None,

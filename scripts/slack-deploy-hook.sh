@@ -68,7 +68,7 @@ esac
 captain=${SLACK_BRIDGE_CAPTAIN_ID:-}
 if [ -z "$captain" ]; then
   ids=$("$slack_cli" auth list --no-color --skip-update 2>/dev/null |
-        sed -n 's/^.*User ID: *\(U[A-Z0-9]*\).*$/\1/p' | sort -u || true)
+        sed -n 's/^.*User ID: *\([UW][A-Z0-9][A-Z0-9]*\)[[:space:]]*$/\1/p' | sort -u || true)
   if [ -n "$ids" ] && [ "$(printf '%s\n' "$ids" | wc -l | tr -d ' ')" = 1 ]; then
     captain=$ids
     say "captain member id from 'slack auth list': $captain"
