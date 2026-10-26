@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Fake herdr for tests: serves $FAKE_HERDR_DIR/panes.json, records argv."""
+import json, os, sys
+from pathlib import Path
+
+d = Path(os.environ["FAKE_HERDR_DIR"])
+with (d / "calls.log").open("a") as fh:
+    fh.write(json.dumps(sys.argv[1:]) + "\n")
+args = sys.argv[1:]
+assert args[:2] == ["--session", "test"] and args[2] == "pane", args
+sub = args[3]
+if sub == "list":
+    print(json.dumps({"id": "cli:pane:list",
+                      "result": {"panes": json.loads((d / "panes.json").read_text())}}))
+elif sub == "process-info":
+    print(json.dumps({"result": {"process_info": {
+        "foreground_process_group_id": 1, "shell_pid": 1,
+        "foreground_processes": [{"name": "zsh", "pid": 1}]}}}))
+elif sub in ("run", "send-keys"):
+    print(json.dumps({"result": {"ok": True}}))
+else:
+    sys.exit(64)

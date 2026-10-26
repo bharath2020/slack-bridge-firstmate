@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Fake macOS `security`: a JSON keychain under $FAKE_SECURITY_DIR; logs argv.
+Adding the item named in $FAKE_SECURITY_REFUSE fails, as with a locked keychain."""
+import json, os, shlex, sys
+from pathlib import Path
+
+d = Path(os.environ["FAKE_SECURITY_DIR"])
+store_path = d / "store.json"
+store = json.loads(store_path.read_text()) if store_path.exists() else {}
+with (d / "argv.log").open("a") as fh:
+    fh.write(json.dumps(sys.argv[1:]) + "\n")
+
+def opts(args):
+    out, i = {}, 0
+    while i < len(args):
+        if args[i] in ("-a", "-s", "-w") and i + 1 < len(args):
+            out[args[i]] = args[i + 1]; i += 2
+        else:
+            out[args[i]] = True; i += 1
+    return out
+
+def run(args):
+    o = opts(args[1:])
+    key = f'{o.get("-a")}/{o.get("-s")}'
+    if args[0] == "add-generic-password":
+        if o.get("-s") == os.environ.get("FAKE_SECURITY_REFUSE"):
+            return 1
+        store[key] = o["-w"]
+        store_path.write_text(json.dumps(store))
+        return 0
+    if args[0] == "find-generic-password":
+        if key not in store:
+            return 44
+        if o.get("-w") is True:
+            print(store[key])
+        return 0
+    return 1
+
+if sys.argv[1:] == ["-i"]:
+    rc = 0
+    for line in sys.stdin:
+        if line.strip():
+            rc = run(shlex.split(line)) or rc
+    sys.exit(rc)
+sys.exit(run(sys.argv[1:]))

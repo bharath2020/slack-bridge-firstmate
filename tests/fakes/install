@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake scripts/install-service.sh for setup.sh: logs its arguments to $FAKE_SYS_DIR/install.log.
+printf '%s\n' "${*:-(none)}" >>"$FAKE_SYS_DIR/install.log"

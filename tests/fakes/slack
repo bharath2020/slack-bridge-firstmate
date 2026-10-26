@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake Slack CLI. `auth list` prints $FAKE_SLACK_DIR/auth (what `login` wrote)
+# or else $FAKE_SLACK_AUTH_LIST. With $FAKE_SLACK_DIR set it logs each call to
+# calls.log and also plays: version ($FAKE_SLACK_VERSION), login (as
+# $FAKE_SLACK_LOGIN_AS), deploy (records app $FAKE_SLACK_APP_ID in .slack/apps.json and runs
+# the project's deploy hook with $FAKE_SLACK_BOT / $FAKE_SLACK_APP, or just
+# exits $FAKE_SLACK_DEPLOY_RC), app settings and upgrade.
+d=${FAKE_SLACK_DIR:-}
+[ -z "$d" ] || printf '%s|NO_INSTALL=%s\n' "$*" "${SLACK_BRIDGE_NO_INSTALL:-}" >>"$d/calls.log"
+case "$1 ${2:-}" in
+  "auth list")
+    if [ -n "$d" ] && [ -f "$d/auth" ]; then cat "$d/auth"; else printf '%s\n' "${FAKE_SLACK_AUTH_LIST:-}"; fi ;;
+  "version "*) echo "Using slack v${FAKE_SLACK_VERSION:-4.12.0}" ;;
+  "login "*) printf '%s\n' "${FAKE_SLACK_LOGIN_AS:-}" >"$d/auth" ;;
+  "deploy "*)
+    [ -z "${FAKE_SLACK_DEPLOY_RC:-}" ] || exit "$FAKE_SLACK_DEPLOY_RC"
+    echo "{\"apps\": {\"T0123\": {\"app_id\": \"${FAKE_SLACK_APP_ID:-A0FAKE}\"}}}" >.slack/apps.json
+    SLACK_BOT_TOKEN=${FAKE_SLACK_BOT:-} SLACK_APP_TOKEN=${FAKE_SLACK_APP:-} \
+      exec ./scripts/slack-deploy-hook.sh ;;
+  "app settings"|"upgrade "*) ;;
+  *) exit 64 ;;
+esac

@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Fake sysctl: pressure level, swap usage and memory size, one per line;
+$FAKE_SYS_DIR/sysctl.txt replaces the default answer."""
+import os
+from pathlib import Path
+
+f = Path(os.environ.get("FAKE_SYS_DIR", "/nonexistent")) / "sysctl.txt"
+print(f.read_text() if f.exists() else
+      "2\ntotal = 2048.00M  used = 1536.00M  free = 512.00M  (encrypted)\n51539607552")

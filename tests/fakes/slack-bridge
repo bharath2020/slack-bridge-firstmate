@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake bin/slack-bridge for setup.sh: logs argv to $FAKE_SYS_DIR/bridge.log;
+# `doctor` prints $FAKE_DOCTOR and exits $FAKE_DOCTOR_RC, `say` exits $FAKE_SAY_RC.
+printf '%s\n' "$*" >>"$FAKE_SYS_DIR/bridge.log"
+case "$1" in
+  doctor) printf '%s\n' "${FAKE_DOCTOR:-ok   Keychain item slack-bridge.bot-token present}"
+          exit "${FAKE_DOCTOR_RC:-0}" ;;
+  say) echo "posted 1 message(s) to the DM"; exit "${FAKE_SAY_RC:-0}" ;;
+esac

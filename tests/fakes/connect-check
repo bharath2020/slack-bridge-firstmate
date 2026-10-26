@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake app-level token check for setup.sh: logs each call to
+# $FAKE_SYS_DIR/connect.log; with $FAKE_CONNECT_ERROR set it prints that and
+# exits $FAKE_CONNECT_RC (default 1).
+echo check >>"$FAKE_SYS_DIR/connect.log"
+[ -z "${FAKE_CONNECT_ERROR:-}" ] || { printf '%s\n' "$FAKE_CONNECT_ERROR" >&2; exit "${FAKE_CONNECT_RC:-1}"; }

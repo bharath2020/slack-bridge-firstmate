@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Fake model CLI (claude, and codex through a symlink).
+
+Records argv and the prompt from stdin in $FAKE_SYS_DIR/model.log (one JSON
+object per run) and prints $FAKE_SYS_DIR/answer.txt. If $FAKE_SYS_DIR/hang
+exists it never answers.
+"""
+import json, os, sys, time
+from pathlib import Path
+
+d = Path(os.environ["FAKE_SYS_DIR"])
+prompt = sys.stdin.read()
+with (d / "model.log").open("a") as fh:
+    fh.write(json.dumps({"argv": [Path(sys.argv[0]).name, *sys.argv[1:]],
+                         "prompt": prompt}) + "\n")
+if (d / "hang").exists():
+    time.sleep(60)
+print((d / "answer.txt").read_text() if (d / "answer.txt").exists() else "")

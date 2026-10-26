@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Fake playwright CLI for `shot` tests: records argv, writes a PNG.
+
+$FAKE_BROWSER_DIR/calls.log gets one JSON argv per run; FAKE_BROWSER_FAIL=1
+exits 1 and FAKE_BROWSER_WRITE=text writes a non-image instead.
+"""
+import json, os, sys
+from pathlib import Path
+
+d = Path(os.environ["FAKE_BROWSER_DIR"])
+with (d / "calls.log").open("a") as fh:
+    fh.write(json.dumps([Path(sys.argv[0]).name, *sys.argv[1:]]) + "\n")
+if os.environ.get("FAKE_BROWSER_FAIL") == "1":
+    sys.exit(1)
+out = Path(sys.argv[-1])
+data = b"not an image" if os.environ.get("FAKE_BROWSER_WRITE") == "text" else \
+    b"\x89PNG\r\n\x1a\n" + b"\0" * 64
+out.write_bytes(data)

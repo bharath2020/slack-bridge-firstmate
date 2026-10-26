@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: scripts/install-service.sh substitutes @REPO@, @HOME@ and @PATH@. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.firstmate.slack-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@REPO@/bin/slack-bridge</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Back off between crash restarts so a bad token cannot spin. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- Interactive, so the bridge keeps answering (load, shed, restart) when
+       the Mac is overloaded. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <!-- The bridge logs to ~/Library/Logs/slack-bridge/bridge.log itself and
+       never writes message bodies or tokens; these catch only crashes. -->
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/slack-bridge/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/slack-bridge/launchd.err.log</string>
+</dict>
+</plist>

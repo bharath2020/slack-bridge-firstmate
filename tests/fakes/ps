@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Fake ps: prints $FAKE_SYS_DIR/ps.txt (pid ppid %cpu rss command), records argv."""
+import json, os, sys
+from pathlib import Path
+
+d = Path(os.environ["FAKE_SYS_DIR"])
+with (d / "calls.log").open("a") as fh:
+    fh.write(json.dumps(["ps", *sys.argv[1:]]) + "\n")
+print((d / "ps.txt").read_text() if (d / "ps.txt").exists() else "", end="")

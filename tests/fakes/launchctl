@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Fake launchctl: records argv. With $FAKE_SYS_DIR/launchctl.json it also
+plays one agent: {"loaded": bool, "unload_ticks": N, "bootstrap_failures": M,
+"pids": [P, ...]}. bootout leaves the old instance unloading for N more calls;
+print reports it until then (as "state = running" with the next pid from
+"pids", the last one repeating, while loaded), and bootstrap fails with
+launchd's error 5 while it is unloading and for M further attempts."""
+import json, os, sys
+from pathlib import Path
+
+d = Path(os.environ["FAKE_SYS_DIR"])
+with (d / "calls.log").open("a") as fh:
+    fh.write(json.dumps(["launchctl", *sys.argv[1:]]) + "\n")
+
+state_file = d / "launchctl.json"
+if not state_file.exists():
+    sys.exit(0)
+st = json.loads(state_file.read_text())
+cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+unloading = st.get("unloading", 0)
+if unloading:
+    st["unloading"] = unloading - 1
+code = 0
+if cmd == "bootout":
+    if st.get("loaded"):
+        st["loaded"] = False
+        st["unloading"] = st.get("unload_ticks", 0)
+    else:
+        print("Boot-out failed: 3: No such process", file=sys.stderr)
+        code = 3
+elif cmd == "print":
+    if not (st.get("loaded") or unloading):
+        print("Could not find service in domain", file=sys.stderr)
+        code = 113
+    elif st.get("loaded"):
+        pids = st.get("pids") or [4242]
+        st["prints"] = st.get("prints", 0) + 1
+        print(f"\tstate = running\n\tpid = {pids[min(st['prints'], len(pids)) - 1]}")
+elif cmd == "bootstrap":
+    if unloading or st.get("bootstrap_failures", 0):
+        if not unloading:
+            st["bootstrap_failures"] -= 1
+        print("Bootstrap failed: 5: Input/output error", file=sys.stderr)
+        code = 5
+    else:
+        st["loaded"] = True
+state_file.write_text(json.dumps(st))
+sys.exit(code)

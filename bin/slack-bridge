@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# slack-bridge - run the bridge CLI with the project venv (.venv, the one
+# `slack init`/`slack deploy` and scripts/install-service.sh create).
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+venv="${SLACK_BRIDGE_VENV:-$here/.venv}"
+py="$venv/bin/python3"
+[ -x "$py" ] || py=python3
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m slack_bridge "$@"

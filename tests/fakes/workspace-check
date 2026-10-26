@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Offline stand-in for legacy bot auth.test. Never contacts Slack.
+[ -z "${FAKE_WORKSPACE_ERROR:-}" ] || exit 1
+printf '%s\n' "${FAKE_STORED_TEAM:-T0123}"
